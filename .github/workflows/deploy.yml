@@ -1,0 +1,68 @@
+name: Deploy ke GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tentukan base path dan URL situs
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          if [ -n "${{ vars.CUSTOM_DOMAIN }}" ]; then
+            echo "VITE_BASE=/" >> "$GITHUB_ENV"
+            echo "VITE_SITE_URL=https://${{ vars.CUSTOM_DOMAIN }}" >> "$GITHUB_ENV"
+          elif [ "$REPO" = "${OWNER}.github.io" ]; then
+            echo "VITE_BASE=/" >> "$GITHUB_ENV"
+            echo "VITE_SITE_URL=https://${OWNER}.github.io" >> "$GITHUB_ENV"
+          else
+            echo "VITE_BASE=/${REPO}/" >> "$GITHUB_ENV"
+            echo "VITE_SITE_URL=https://${OWNER}.github.io/${REPO}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      # GitHub Pages tidak mengenal rute SPA: 404.html berisi aplikasi yang sama,
+      # sehingga membuka /berita atau /admin langsung tetap berfungsi.
+      - name: SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
